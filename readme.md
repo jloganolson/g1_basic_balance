@@ -1,6 +1,7 @@
 This is my first working(ish) attempt at making a sim2real balancing policy for the 23DOF G1 using Mujoco Playground.
+![policy output](output.gif)
 
-*If you get it working better or have any improvements, please let me know!*
+*If you make any improvements or create a separate balance policy, please let me know - I want to learn!*
 
 ### Qualifiers
 * It's brittle and jank but it kind of works (i think?), so I thought I'd put it as a standalone repo on github in case this helps out someone else.
