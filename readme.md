@@ -1,6 +1,8 @@
-This is my first working(ish) attempt at making a sim2real balancing policy for the 23DOF G1 using Mujoco Playground.
+This is my first working(ish) attempt at making and deploygin a balancing policy for the 23DOF G1.
+
 ![policy output](output.gif)
 
+It borrows heavily from the different unitree repos and mujoco playground examples.
 *If you make any improvements or create a separate balance policy, please let me know - I want to learn!*
 
 ### Qualifiers
@@ -8,7 +10,7 @@ This is my first working(ish) attempt at making a sim2real balancing policy for 
 * I didn't cleanup/comment/organize the code at all. It's pretty small but might be difficult to follow, - you are absolutely welcome to ask me questions via email/twitter.
 * This code is copy/pasted from the [main repo I was derping around in](https://github.com/jloganolson/g1_mjx_helloworld) and I didn't test it thoroughly - if you run into issues, again, you're totally welcome to ping me.
 
-It borrows heavily from the different unitree repos and mujoco playground examples.
+
 
 ### Instructions
 Setup/pip install the following repos 
