@@ -16,6 +16,8 @@ from utils_real import (
     action_scale,
     ang_vel_scale,
     mask_arms,
+    G1MjxJointIndex,
+    RESTRICTED_JOINT_RANGE,
 )
 from unitree_sdk2py.utils.thread import RecurrentThread
 from unitree_sdk2py.utils.crc import CRC
@@ -27,7 +29,7 @@ from unitree_sdk2py.core.channel import ChannelSubscriber, ChannelFactoryInitial
 from unitree_sdk2py.core.channel import ChannelPublisher, ChannelFactoryInitialize
 import time
 from dotenv import load_dotenv
-import os
+
 
 import numpy as np
 load_dotenv()
@@ -41,7 +43,7 @@ NETWORK_CARD_NAME = 'enxc8a362b43bfd'
 # from pathlib import Path
 import onnxruntime as rt
 
-# from keyboard_reader import KeyboardController
+from keyboard_reader import KeyboardController
 
 import time
 
@@ -94,12 +96,16 @@ class Controller:
         # self.cmd = np.array([0.0, 0, 0])
         self.counter = 0
 
-        
-        # self._controller = KeyboardController(
-        #     vel_scale_x=1.0,
-        #     vel_scale_y=1.0,
-        #     vel_scale_rot=1.0,
-        # )
+        # Convert joint range tuples to numpy arrays for efficient clamping
+        joint_limits = np.array(RESTRICTED_JOINT_RANGE, dtype=np.float32)
+        self._joint_lower_bounds = joint_limits[:, 0]
+        self._joint_upper_bounds = joint_limits[:, 1]
+
+        self._controller = KeyboardController(
+            vel_scale_x=1.0,
+            vel_scale_y=1.0,
+            vel_scale_rot=1.0,
+        )
         # print("Hello")
 
         self.control_dt = 0.02
@@ -200,24 +206,25 @@ class Controller:
         self.counter += 1
         # Get the current joint position and velocity
         for i in range(G1_NUM_MOTOR):
-            self.qj[i] = self.low_state.motor_state[joint2motor_idx[i]].q
+            self.qj[i] = self.low_state.motor_state[joint2motor_idx[i]].q - default_pos[i]
             self.dqj[i] = self.low_state.motor_state[joint2motor_idx[i]].dq
 
         # imu_state quaternion: w, x, y, z
         quat = self.low_state.imu_state.quaternion
         gyro = self.low_state.imu_state.gyroscope
-        ang_vel = np.array(
-            [self.low_state.imu_state.gyroscope], dtype=np.float32)
+        # print(gyro)
+        # ang_vel = np.array(
+        #     self.low_state.imu_state.gyroscope, dtype=np.float32)
 
         # create observation
         gravity = get_gravity_orientation(quat)
         joint_angles = self.qj.copy()
         joint_velocities = self.dqj.copy()
         phase = np.concatenate([np.cos(self._phase), np.sin(self._phase)])
-        # command = self._controller.get_command() # Original line
-        command = np.array([0.0, 0.0, 0.0], dtype=np.float32) # Debug: Set command to zeros
+        command = self._controller.get_command() # Original line
+        # command = np.array([0.0, 0.0, 0.0], dtype=np.float32) # Debug: Set command to zeros
         obs = np.hstack([
-            ang_vel,
+            gyro,
             gravity,
             command,
             joint_angles,
@@ -227,15 +234,8 @@ class Controller:
         ]).astype(np.float32)
         # return obs.astype(np.float32)
 
-        # Get the action from the policy network
-        # obs_tensor = jax.numpy.array(obs).reshape(1, -1)
-        # Create a deterministic key for inference
-        # inference_key = jax.random.PRNGKey(0)
-        # input = {
-        #     'state': obs_tensor,
-        #     'privileged_state': jp.zeros(153)
-        # }
         self.action = self.policy.get_control(obs)
+        # print("Action: ", self.action)
         action_effect = self.action * action_scale
         # Create a mask to zero out action for the last 10 joints (arms) if config is set.
         # Assuming mjx_model.nu is 23.
@@ -244,9 +244,23 @@ class Controller:
         masked_action_effect = np.where(
             mask_arms, action_effect * arm_mask, action_effect
         )
+        # print(masked_action_effect)
         # print(f"default_pos_array type: {type(self.default_pos_array)}, shape: {self.default_pos_array.shape}")
         # print(f"masked_action_effect type: {type(masked_action_effect)}, shape: {masked_action_effect.shape}")
-        motor_targets = self.default_pos_array  + masked_action_effect
+        motor_targets_unclamped = self.default_pos_array  + masked_action_effect
+
+        # Clamp motor targets to joint limits and check for clamping
+        motor_targets = np.clip(
+            motor_targets_unclamped, self._joint_lower_bounds, self._joint_upper_bounds
+        )
+        clamped_indices = np.where(motor_targets != motor_targets_unclamped)[0]
+        if clamped_indices.size > 0:
+            print("WARNING: Clamping motor targets for joints:")
+            for idx in clamped_indices:
+                print(f"  Joint {idx}: {motor_targets_unclamped[idx]:.3f} -> {motor_targets[idx]:.3f} (limits: [{self._joint_lower_bounds[idx]:.3f}, {self._joint_upper_bounds[idx]:.3f}])")
+
+        # print("Ankle motor targets:")
+        # print(f"Left ankle pitch: {motor_targets[G1MjxJointIndex.LeftAnklePitch]:.3f}")
 
         # transform action to target_dof_pos
         # target_dof_pos = self.action
